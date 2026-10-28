@@ -5,6 +5,7 @@ package providertest
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"maps"
 	"net"
 	stdos "os"
@@ -1014,6 +1015,73 @@ func RunOS(t *testing.T, os provider.OS, newProvider func(t *testing.T) provider
 		}
 		if _, err := p.Create(testContext(t), spec); !errors.Is(err, provider.ErrUnsupported) {
 			t.Fatalf("Create with an ImageFile = %v, want ErrUnsupported", err)
+		}
+	})
+
+	t.Run("CaptureDisk", func(t *testing.T) {
+		if os != provider.Linux {
+			t.Skip("image builds are for Linux guests")
+		}
+		p := newProvider(t)
+		capturer, ok := provider.As[provider.DiskCapturer](p)
+		if !ok {
+			t.Skip("provider does not offer DiskCapturer")
+		}
+		// A disk is captured as an overlay on a base whose SHA-256 the
+		// provider knows: one BaseImages lists.
+		booter, ok := provider.As[provider.ImageBooter](p)
+		if !ok {
+			t.Skip("provider does not offer ImageBooter, which lists the bases a disk is captured on")
+		}
+		bases, err := booter.BaseImages()
+		if err != nil {
+			t.Fatalf("BaseImages: %v", err)
+		}
+		if len(bases) == 0 {
+			t.Skip("provider lists no base")
+		}
+		base := bases[0]
+		ctx := testContext(t)
+		spec := validSpec(os)
+		spec.Image = base.Name
+		inst, err := p.Create(ctx, spec.Clone())
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if _, err := p.Wait(ctx, inst.ID, provider.Ready); err != nil {
+			t.Fatalf("Wait Ready: %v", err)
+		}
+		if err := p.Start(ctx, inst.ID); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		if _, err := p.Wait(ctx, inst.ID, provider.Running); err != nil {
+			t.Fatalf("Wait Running: %v", err)
+		}
+		dst := filepath.Join(t.TempDir(), "captured.qcow2")
+		if _, err := capturer.CaptureDisk(ctx, inst.ID, dst); !errors.Is(err, provider.ErrInvalidTransition) {
+			t.Fatalf("CaptureDisk of a Running instance = %v, want ErrInvalidTransition", err)
+		}
+		if err := p.Stop(ctx, inst.ID); err != nil {
+			t.Fatalf("Stop: %v", err)
+		}
+		if _, err := p.Wait(ctx, inst.ID, provider.Stopped); err != nil {
+			t.Fatalf("Wait Stopped: %v", err)
+		}
+		captured, err := capturer.CaptureDisk(ctx, inst.ID, dst)
+		if err != nil {
+			t.Fatalf("CaptureDisk: %v", err)
+		}
+		if fi, err := stdos.Stat(dst); err != nil || fi.Size() == 0 {
+			t.Fatalf("captured disk: %v, want a file with data", err)
+		}
+		if _, err := stdos.Stat(dst + ".tmp"); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("CaptureDisk left %s.tmp behind: %v", dst, err)
+		}
+		if captured.Base != base.Name || captured.BaseDigest != base.SHA256 {
+			t.Fatalf("captured on %q (%s), want %q (%s)", captured.Base, captured.BaseDigest, base.Name, base.SHA256)
+		}
+		if err := p.Destroy(ctx, inst.ID); err != nil {
+			t.Fatalf("Destroy: %v", err)
 		}
 	})
 }

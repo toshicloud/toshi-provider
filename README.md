@@ -44,6 +44,18 @@ cannot open the file it is given, as when it runs as another user or in
 another mount namespace than the agent, refuses it with `ErrUnsupported`;
 so does any provider without the facet.
 
+## Image build
+
+A provider that saves image builds offers the `disk_capturer` facet:
+`CaptureDisk` writes the root disk of a stopped instance to a path the
+agent names, as a compressed qcow2 overlay whose backing file is named by
+the base's file name alone, and returns the base's name and SHA-256. The
+file appears at the path only once it is complete. A provider program
+serves it over the protocol: the agent names a path in a directory it
+made, and a program that cannot see that directory refuses with
+`ErrUnsupported`. A program that does not serve the call is treated as a
+provider without the facet, and its host builds no image.
+
 ## Conformance
 
 A provider linked into the agent runs the suite in its own tests:
@@ -75,3 +87,5 @@ provider does not implement are skipped.
 image version on one of the provider's bases; with it, the suite boots an
 instance from that version when the provider offers `image_booter`.
 Without it the suite checks only the list of bases.
+When the provider offers `disk_capturer`, the suite also stops an
+instance and saves its disk.
