@@ -130,6 +130,14 @@ type Spec struct {
 	// CPUMaxPercent caps the instance's CPU time at this percent of one
 	// CPU; 0 means no cap.
 	CPUMaxPercent int `json:"cpu_max_percent,omitempty"`
+	// ImageFile, when set, is the absolute path of a qcow2 overlay the
+	// instance boots from in place of Image's base: an image version whose
+	// backing file is named by Image's base file name alone. Only a provider
+	// that implements ImageBooter accepts it; it must find that base file
+	// beside ImageFile, as the one Image names, and refuses any other chain.
+	// Others refuse the spec. An instance with an ImageFile is never
+	// snapshotted, restored or captured.
+	ImageFile string `json:"image_file,omitempty"`
 	// ShareDir, when set, is a host directory a Linux guest mounts over 9p
 	// with the tag "toshi-share".
 	ShareDir string `json:"share_dir,omitempty"`
@@ -203,6 +211,10 @@ func (s Spec) Validate() error {
 		return fmt.Errorf("%w: CPUWeight must be within 1-10000, got %d", ErrInvalidSpec, s.CPUWeight)
 	case s.MemoryMaxMiB < 0:
 		return fmt.Errorf("%w: MemoryMaxMiB must not be negative, got %d", ErrInvalidSpec, s.MemoryMaxMiB)
+	case s.ImageFile != "" && s.OS != Linux:
+		return fmt.Errorf("%w: ImageFile is for Linux guests, got OS %q", ErrInvalidSpec, s.OS)
+	case s.ImageFile != "" && (!filepath.IsAbs(s.ImageFile) || filepath.Clean(s.ImageFile) != s.ImageFile):
+		return fmt.Errorf("%w: ImageFile must be a clean absolute path, got %q", ErrInvalidSpec, s.ImageFile)
 	case s.ShareDir != "" && s.OS != Linux:
 		return fmt.Errorf("%w: ShareDir is for Linux guests, got OS %q", ErrInvalidSpec, s.OS)
 	case len(s.Disks) > 0 && s.OS != Linux:
@@ -505,6 +517,25 @@ type DiskCapture struct {
 	Base string
 	// BaseDigest is the base image's SHA-256 in hex.
 	BaseDigest string
+}
+
+// ImageBooter is implemented by providers that boot an instance from an
+// image version, Spec.ImageFile. Callers find it with a type assertion on a
+// Provider.
+type ImageBooter interface {
+	// BaseImages lists the bases the provider boots that an image version
+	// can be an overlay on, each with its SHA-256 as the provider knows it.
+	// A base whose SHA-256 the provider does not know is left out.
+	BaseImages() ([]BaseImage, error)
+}
+
+// BaseImage is a base an image version can be an overlay on.
+type BaseImage struct {
+	// Name is the base's name, such as "ubuntu-24.04", as Spec.Image
+	// names it.
+	Name string
+	// SHA256 is the base file's SHA-256 in hex.
+	SHA256 string
 }
 
 // Forgetter is implemented by providers that drop a destroyed instance from

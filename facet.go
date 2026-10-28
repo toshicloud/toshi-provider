@@ -43,6 +43,7 @@ const (
 	FacetUsageReader        Facet = "usage_reader"
 	FacetHostMemoryReader   Facet = "host_memory_reader"
 	FacetDiskCapturer       Facet = "disk_capturer"
+	FacetImageBooter        Facet = "image_booter"
 )
 
 // FacetLister is a Provider or a Backend that lists the facets it offers.
@@ -88,6 +89,7 @@ var facetTypes = []struct {
 	{FacetUsageReader, reflect.TypeFor[UsageReader]()},
 	{FacetHostMemoryReader, reflect.TypeFor[HostMemoryReader]()},
 	{FacetDiskCapturer, reflect.TypeFor[DiskCapturer]()},
+	{FacetImageBooter, reflect.TypeFor[ImageBooter]()},
 }
 
 // As returns v as the optional interface T when v offers it: v implements
