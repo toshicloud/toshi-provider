@@ -7,6 +7,8 @@ import (
 	"errors"
 	"maps"
 	"net"
+	stdos "os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"sync"
@@ -22,7 +24,8 @@ const subtestTimeout = 10 * time.Second
 type Option func(*options)
 
 type options struct {
-	guestLink func(ctx context.Context, conn net.Conn) error
+	guestLink    func(ctx context.Context, conn net.Conn) error
+	imageVersion func(t *testing.T, base provider.BaseImage) string
 }
 
 // WithGuestLink has the suite check the guest protocol on a connection
@@ -34,6 +37,16 @@ type options struct {
 // as skipped.
 func WithGuestLink(check func(ctx context.Context, conn net.Conn) error) Option {
 	return func(o *options) { o.guestLink = check }
+}
+
+// WithImageVersion has the suite boot an instance from an image version
+// when the provider offers ImageBooter: make returns the absolute path of
+// an image version on base, one of the bases the provider lists, made as
+// the provider boots one. Without this option the suite checks only the
+// provider's list of bases, and reports the boot as skipped. With
+// WithGuestLink too, the booted guest's link is checked.
+func WithImageVersion(make func(t *testing.T, base provider.BaseImage) string) Option {
+	return func(o *options) { o.imageVersion = make }
 }
 
 // Run executes the provider conformance suite for Linux specs. Each subtest
@@ -919,6 +932,90 @@ func RunOS(t *testing.T, os provider.OS, newProvider func(t *testing.T) provider
 			t.Fatalf("DialGuest unknown: %v, want ErrNotFound", err)
 		}
 	})
+	t.Run("ImageBoot", func(t *testing.T) {
+		if os != provider.Linux {
+			t.Skip("image versions are for Linux guests")
+		}
+		p := newProvider(t)
+		booter, ok := provider.As[provider.ImageBooter](p)
+		if !ok {
+			t.Skip("provider does not offer ImageBooter")
+		}
+		bases, err := booter.BaseImages()
+		if err != nil {
+			t.Fatalf("BaseImages: %v", err)
+		}
+		for _, b := range bases {
+			if b.Name == "" || len(b.SHA256) != 64 || !filepath.IsAbs(b.Path) {
+				t.Fatalf("BaseImages lists %+v, want a name, a SHA-256 in hex and an absolute path", b)
+			}
+			if _, err := stdos.Stat(b.Path); err != nil {
+				t.Fatalf("base %q: %v", b.Name, err)
+			}
+		}
+		if o.imageVersion == nil {
+			t.Skip("no WithImageVersion: the suite has no image version to boot")
+		}
+		if len(bases) == 0 {
+			t.Skip("provider lists no base")
+		}
+		ctx := testContext(t)
+		spec := validSpec(os)
+		spec.Image, spec.ImageFile = bases[0].Name, o.imageVersion(t, bases[0])
+		inst, err := p.Create(ctx, spec.Clone())
+		if err != nil {
+			t.Fatalf("Create from an image version: %v", err)
+		}
+		got, err := p.Wait(ctx, inst.ID, provider.Ready)
+		if err != nil {
+			t.Fatalf("Wait Ready: %v", err)
+		}
+		assertSpecRoundTrip(t, spec, got.Spec)
+		if got.Spec.Image != spec.Image || got.Spec.ImageFile != spec.ImageFile {
+			t.Fatalf("Spec.Image, ImageFile = %q, %q; want %q, %q", got.Spec.Image, got.Spec.ImageFile, spec.Image, spec.ImageFile)
+		}
+		if err := p.Start(ctx, inst.ID); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		if _, err := p.Wait(ctx, inst.ID, provider.Running); err != nil {
+			t.Fatalf("Wait Running: %v", err)
+		}
+		// The guest booted from the version answers on its link.
+		if gc, ok := provider.As[provider.GuestConnector](p); ok && o.guestLink != nil {
+			conn, err := gc.DialGuest(ctx, inst.ID)
+			if err != nil && !errors.Is(err, provider.ErrUnsupported) {
+				t.Fatalf("DialGuest: %v", err)
+			}
+			if err == nil {
+				err = o.guestLink(ctx, conn)
+				_ = conn.Close()
+				if err != nil {
+					t.Fatalf("guest link: %v", err)
+				}
+			}
+		}
+		if err := p.Destroy(ctx, inst.ID); err != nil {
+			t.Fatalf("Destroy: %v", err)
+		}
+	})
+
+	t.Run("ImageFileRefused", func(t *testing.T) {
+		if os != provider.Linux {
+			t.Skip("image versions are for Linux guests")
+		}
+		p := newProvider(t)
+		if _, ok := provider.As[provider.ImageBooter](p); ok {
+			t.Skip("provider offers ImageBooter")
+		}
+		spec := validSpec(os)
+		spec.ImageFile = filepath.Join(t.TempDir(), "version.qcow2")
+		if err := stdos.WriteFile(spec.ImageFile, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Create(testContext(t), spec); !errors.Is(err, provider.ErrUnsupported) {
+			t.Fatalf("Create with an ImageFile = %v, want ErrUnsupported", err)
+		}
+	})
 }
 
 // RunStateVolume checks the one-instance rule of a state disk in
@@ -1008,6 +1105,7 @@ func RunStateVolume(t *testing.T, newProvider func(t *testing.T) provider.Provid
 			t.Fatalf("AttachDisk(state) = %v, want ErrUnsupported", err)
 		}
 	})
+
 }
 
 func testContext(t *testing.T) context.Context {

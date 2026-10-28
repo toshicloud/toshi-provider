@@ -19,8 +19,8 @@ require go.toshicloud.io/provider v0.1.0
 `VERSION` is the module's version. It is raised when the contract or its
 suite changes, once per release of the module, not with every change.
 
-A provider program speaks version 1 of the VM provider protocol
-(`api/proto/toshi/backend/provider/v1/provider.proto`) and says so in the
+A provider program speaks version 1 of the VM provider protocol (the
+protobuf package `toshi.backend.provider.v1`) and says so in the
 shared handshake (`toshi.backend.v1`, type `vm_provider`). The two rules
 that keep a provider and the agent compatible:
 
@@ -31,6 +31,18 @@ that keep a provider and the agent compatible:
   version of this module, the highest any of its modules requires, so a
   provider built against an older contract that no longer matches it
   fails when the distribution is built, not when the agent runs.
+
+## Image boot
+
+A provider that boots image versions offers the `image_booter` facet:
+`BaseImages` lists the bases it boots them on, each with its name, its
+SHA-256 and the absolute path of its file on the host, and a spec whose
+`ImageFile` names a version on one of those bases boots that version. The
+facet crosses the provider protocol like the others, so a provider
+program boots image versions as a linked provider does. A program that
+cannot open the file it is given, as when it runs as another user or in
+another mount namespace than the agent, refuses it with `ErrUnsupported`;
+so does any provider without the facet.
 
 ## Conformance
 
@@ -58,3 +70,8 @@ gives guests a connection reaches the guest protocol on it. In a provider's
 own tests that check runs only with `providertest.WithGuestLink`, since
 the guest protocol is internal to Toshi; subtests that need a hook the
 provider does not implement are skipped.
+
+`providertest.WithImageVersion` gives the suite a function that makes an
+image version on one of the provider's bases; with it, the suite boots an
+instance from that version when the provider offers `image_booter`.
+Without it the suite checks only the list of bases.

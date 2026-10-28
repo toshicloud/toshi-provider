@@ -533,9 +533,13 @@ type ImageBooter interface {
 type BaseImage struct {
 	// Name is the base's name, such as "ubuntu-24.04", as Spec.Image
 	// names it.
-	Name string
+	Name string `json:"name"`
 	// SHA256 is the base file's SHA-256 in hex.
-	SHA256 string
+	SHA256 string `json:"sha256"`
+	// Path is the base file's absolute path on the host. An image version
+	// on this base boots only with a link to it, named Name with ".qcow2",
+	// beside the version's file.
+	Path string `json:"path"`
 }
 
 // Forgetter is implemented by providers that drop a destroyed instance from
