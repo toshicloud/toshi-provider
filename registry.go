@@ -15,9 +15,8 @@ import (
 // agent selects a provider without naming the kinds it knows.
 
 // Factory builds a backend of one kind: decode fills the provider's own
-// configuration from the caller's, as a key provider's Factory reads its
-// table (internal/keyprovider/factory.go), and fills a *Host with what the
-// host gives every provider. A Factory only decodes and starts nothing, so
+// configuration from the caller's, and fills a *Host with what the host
+// gives every provider. A Factory only decodes and starts nothing, so
 // a caller asks a backend what it can do and what to check on the host
 // (backend.go) without starting the provider.
 type Factory func(decode func(v any) error) (Backend, error)

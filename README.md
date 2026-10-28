@@ -4,8 +4,8 @@ The contract every Toshi VM provider implements: the `Provider` interface
 and its optional facets, the spec, instance and error types, the host
 check report, the registry of provider kinds, and `providertest`, the
 conformance suite every provider passes. The host agent opens a provider
-through this contract and never depends on a particular one
-([docs/architecture.md](../docs/architecture.md#the-provider-contract)).
+through this contract and never depends on a particular one: the only
+thing it knows about a provider is the kind its configuration names.
 
 The module depends on nothing of Toshi's own module, so a provider built
 in another module requires only this one:
@@ -44,20 +44,14 @@ func TestConformance(t *testing.T) {
 }
 ```
 
-A provider program runs it through the agent's adapter, from a checkout of
-the Toshi repository. `TOSHI_PROVIDER_COMMAND` starts the program, its
-arguments separated by spaces, and `TOSHI_PROVIDER_SETTINGS` is its own
-settings, one JSON object. Each subtest starts the program afresh, as the
-agent does when its configuration names a `command`. The suite does not
-attach to a program already running, since that program would keep one
+A provider program runs it through the agent's adapter, in Toshi's own
+tests. `TOSHI_PROVIDER_COMMAND` starts the program, its arguments
+separated by spaces, and `TOSHI_PROVIDER_SETTINGS` is its own settings,
+one JSON object. Each subtest starts the program afresh, as the agent
+does when its configuration names a `command`. The suite does not attach
+to a program already running, since that program would keep one
 subtest's instances into the next and the suite expects a provider that
-holds none:
-
-```sh
-TOSHI_PROVIDER_COMMAND=/path/to/your-provider \
-TOSHI_PROVIDER_SETTINGS='{}' \
-  go test -run TestConformanceOfAProgram ./internal/agent/providerproc
-```
+holds none.
 
 Through the adapter the suite also checks the guest link: a provider that
 gives guests a connection reaches the guest protocol on it. In a provider's
